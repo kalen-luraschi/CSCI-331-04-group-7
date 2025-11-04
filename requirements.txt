@@ -1,0 +1,7 @@
+Requirements:
+Python 3.10+ installed
+pygame >= 2.0.0
+    (pip install pygame)
+
+Run the Game:
+python 2048.py
