@@ -131,6 +131,53 @@ class Game2048:
                         return False
         return True
     
+    #####################################################################
+    #                    minmax functions below                         #
+    #####################################################################
+    
+    def clone(self):
+        g = Game2048(self.size)
+        g.grid = [row[:] for row in self.grid]
+        g.score = self.score
+        return g
+    
+    # for when minmax has to check the future branches
+    def apply_move_no_spawn(self, direction):
+        grid_copy = [row[:] for row in self.grid]
+        score_before = self.score
+
+        rotations = {0: 1, 1: 2, 2: 3, 3: 0}
+        times = rotations[direction]
+        for _ in range(times):
+            grid_copy = [list(row) for row in zip(*grid_copy[::-1])]
+
+        moved = False
+        new_grid = []
+        temp_score = 0
+
+        for row in grid_copy:
+            new_row = [v for v in row if v != 0]
+            new_row += [0] * (self.size - len(new_row))
+
+            for i in range(self.size - 1):
+                if new_row[i] != 0 and new_row[i] == new_row[i + 1]:
+                    new_row[i] *= 2
+                    temp_score += new_row[i]
+                    new_row[i + 1] = 0
+
+            new_row = [v for v in new_row if v != 0]
+            new_row += [0] * (self.size - len(new_row))
+            new_grid.append(new_row)
+
+        for _ in range((4 - times) % 4):
+            new_grid = [list(row) for row in zip(*new_grid[::-1])]
+
+        if new_grid != self.grid:
+            moved = True
+
+        return moved, new_grid, temp_score, score_before
+
+    
 def draw_grid(win, game):
     win.fill(BG_COLOR)
     for r in range(game.size):
@@ -162,15 +209,136 @@ def draw_grid(win, game):
 
     pygame.display.update()
 
+##############################################################################
+class minmax_agent:
+    """
+    first we get the root which is the current game state
+        then we have our 4 directions we can move the board
+        we move in all directions to get our child branches (4) with the new move
+            for each direction we can move, we place a 2 and a 4(for now just 2) in each spot(if spot is open) and take the average h of all possible random spawns
+        we then choose the best h from the 4 directions
+    """
+    def __init__(self, depth=3):
+        self.depth = depth
+    
+    def act_random(self, game):
+        """Returns a random move direction"""
+        valid_moves = []
+
+        #for each direction
+        for move in range(4):
+            moved, new_grid, gained_score, old_score = game.apply_move_no_spawn(move)
+            if moved:
+                valid_moves.append(move)
+
+        if not valid_moves:
+            return None
+            
+        return random.choice(valid_moves)
+    
+    def evaluate_h_v1(self, game):
+        """h: prefer high score, more empty spaces, and big tiles."""
+        empty_tiles = sum(row.count(0) for row in game.grid)
+        max_tile = max(max(row) for row in game.grid)
+        return game.score + empty_tiles * 10 + max_tile / 4
+    
+    def act_simple(self, game):
+        """depth of one, picks best h (evaluate_h_v1)"""
+        best_move = None
+        best_score = -float('inf')
+        for move in range(4):  
+            moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+            if moved:
+                temp = game.clone()
+                temp.grid = new_grid
+                temp.score += gained_score
+                value = self.evaluate_h_v1(temp)
+
+                if value > best_score:
+                    best_score = value
+                    best_move = move
+        return best_move
+    
+    def act_simple_minmax(self, game, depth=2):
+        """first minmax try, picks best h (evaluate_h_v1)"""
+        best_move = None
+        best_score = -float('inf')
+
+        for move in range(4):
+            #for first 4 options
+            moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+            if not moved:
+                continue
+        
+            temp = game.clone()
+            temp.grid = new_grid
+            temp.score += gained_score
+
+            #go down a branch
+            value = self.minmax(temp, depth -1, False)
+
+            if value > best_score:
+                best_score = value
+                best_move = move
+
+        return best_move
+    
+    def minmax(self, game, depth, maximizing):
+        if depth == 0 or game.is_game_over():
+            return game.score
+        
+        if maximizing:
+            #starts this branch by doing possible 4 move
+            best_score = -float('inf')
+            for move in range(4):
+                moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+                if not moved:
+                    continue
+            
+                temp = game.clone()
+                temp.grid = new_grid
+                temp.score += gained_score
+
+                value = self.minmax(temp, depth -1, False)
+
+                if value > best_score:
+                    best_score = value
+                
+            return best_score if best_score != -float('inf') else game.score
+        else:
+            #starts (supposed to) this branch by creating an instance of every possible random spot filled by a 2 or 4
+            #next if idk
+            worst_score = float('inf')
+            #implement part that calculates random spawns here
+            for _ in range(2):
+                temp = game.clone()
+                temp.spawn_tile()
+                value = self.minmax(temp, depth - 1, True)
+                if value < worst_score:
+                    worst_score = value
+            return worst_score
+        
+        
+############################################################
+
 def main():
     clock = pygame.time.Clock()
     game = Game2048()
     running = True
     game_over = False
+    ai = minmax_agent()
+    use_ai = True
 
     while running:
         clock.tick(FPS)
         draw_grid(WINDOW, game)
+
+        if use_ai and not game_over:
+            #move = ai.act_random(game) #moves randomly
+            #move = ai.act_simple(game) #only looking for best h for one layer
+            move = ai.act_simple_minmax(game, depth = 8) #very simple minmax algorithm
+            if move is not None:
+                game.move(move)
 
         if game_over:
             overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)

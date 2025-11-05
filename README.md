@@ -8,8 +8,11 @@ presentable UI/interface is expected.
 Reference: https://medium.com/data-science/a-puzzle-for-ai-eb7a3cb8e599
 
 Developers:
-Kalen Luraschi
-Ethan white
-Daniel Birley
+- Kalen Luraschi
+- Ethan White
+- Daniel Birley
 
 How to run the project guid:
+- In the `code` folder run `python 2048.py`
+
+
