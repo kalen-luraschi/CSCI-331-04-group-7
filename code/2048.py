@@ -11,18 +11,40 @@ import random
 import math
 from copy import deepcopy
 import time
+import os
+import sys
 
-pygame.init()
-FPS = 60
-SIZE = 4
-WIDTH, HEIGHT = 600, 600
-TILE_SIZE = WIDTH // SIZE
-BG_COLOR = (205, 192, 180)
-GRID_COLOR = (187, 173, 160)
-FONT_COLOR = (119, 110, 101)
-FONT = pygame.font.SysFont("comicsans", 55, bold=True)
-WINDOW = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("2048 Classic")
+# Set headless mode for pygame if benchmarking
+if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
+    os.environ['SDL_VIDEODRIVER'] = 'dummy'
+
+try:
+    pygame.init()
+    FPS = 60
+    SIZE = 4
+    WIDTH, HEIGHT = 600, 600
+    TILE_SIZE = WIDTH // SIZE
+    BG_COLOR = (205, 192, 180)
+    GRID_COLOR = (187, 173, 160)
+    FONT_COLOR = (119, 110, 101)
+    if len(sys.argv) <= 1 or sys.argv[1] != "benchmark":
+        FONT = pygame.font.SysFont("comicsans", 55, bold=True)
+        WINDOW = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("2048 Classic")
+    else:
+        FONT = None
+        WINDOW = None
+except:
+    # Fallback if pygame fails
+    FPS = 60
+    SIZE = 4
+    WIDTH, HEIGHT = 600, 600
+    TILE_SIZE = WIDTH // SIZE
+    BG_COLOR = (205, 192, 180)
+    GRID_COLOR = (187, 173, 160)
+    FONT_COLOR = (119, 110, 101)
+    FONT = None
+    WINDOW = None
 
 class Tile:
     COLORS = {
@@ -214,6 +236,76 @@ def log_result(text):
     with open("results.txt", "a") as f:
         f.write(text + "\n")
 
+def show_ai_menu():
+    """Display menu for selecting AI method"""
+    menu_font = pygame.font.SysFont("comicsans", 45, bold=True)
+    sub_font = pygame.font.SysFont("comicsans", 28, bold=True)
+    small_font = pygame.font.SysFont("comicsans", 18)
+    
+    WINDOW.fill(BG_COLOR)
+    
+    title = menu_font.render("Select AI Method", True, (80, 70, 60))
+    WINDOW.blit(title, (WIDTH // 2 - title.get_width() // 2, 40))
+    
+    options = [
+        ("1", "Random", "Random moves"),
+        ("2", "Simple Greedy", "One-step lookahead"),
+        ("3", "Minmax", "Multi-step search"),
+        ("4", "Alpha-Beta", "Minmax with pruning"),
+        ("5", "Expectimax", "Probabilistic expectations (optimized)"),
+        ("M", "Manual", "Play yourself (arrow keys)"),
+    ]
+    
+    # Better spacing to fit all options
+    y_start = 110
+    spacing = 75
+    for i, (key, name, desc) in enumerate(options):
+        y = y_start + i * spacing
+        # Key and name on same line
+        key_text = sub_font.render(f"[{key}] {name}", True, (80, 70, 60))
+        WINDOW.blit(key_text, (WIDTH // 2 - key_text.get_width() // 2, y))
+        
+        # Description on next line, indented
+        desc_text = small_font.render(desc, True, (120, 110, 100))
+        WINDOW.blit(desc_text, (WIDTH // 2 - desc_text.get_width() // 2, y + 32))
+    
+    # Hint at bottom
+    hint = small_font.render("Press a number key (1-5) or M to select, ESC to quit", True, (150, 140, 130))
+    WINDOW.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 40))
+    
+    pygame.display.update()
+    
+    waiting = True
+    selected = None
+    
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return None
+                elif event.key == pygame.K_1:
+                    selected = "random"
+                    waiting = False
+                elif event.key == pygame.K_2:
+                    selected = "simple"
+                    waiting = False
+                elif event.key == pygame.K_3:
+                    selected = "minmax"
+                    waiting = False
+                elif event.key == pygame.K_4:
+                    selected = "alpha_beta"
+                    waiting = False
+                elif event.key == pygame.K_5:
+                    selected = "expectimax"
+                    waiting = False
+                elif event.key == pygame.K_m:
+                    selected = "manual"
+                    waiting = False
+    
+    return selected
+
 ##############################################################################
 class minmax_agent:
     """
@@ -225,6 +317,8 @@ class minmax_agent:
     """
     def __init__(self, depth=3):
         self.depth = depth
+        self.transposition_table = {}  # Cache for expectimax positions
+        self.max_tt_size = 100000  # Limit transposition table size
     
     def act_random(self, game):
         """Returns a random move direction"""
@@ -302,7 +396,85 @@ class minmax_agent:
                     merges += v * math.log2(v)
         merge_score = merges * 500
 
-        return empty_tiles + smoothness * 100 + corner_bonus * 1000 + merge_score + game.score + max_tile * 20 
+        return empty_tiles + smoothness * 100 + corner_bonus * 1000 + merge_score + game.score + max_tile * 20
+    
+    def evaluate_h_expectimax(self, game):
+        """
+        Optimized heuristic for expectimax based on Stack Overflow best practices.
+        Includes monotonicity penalty and improved merge counting.
+        """
+        grid = game.grid
+        
+        # 1. Empty tiles (more is better)
+        empty_tiles = sum(row.count(0) for row in game.grid)
+        
+        # 2. Monotonicity penalty (non-monotonic rows/cols hurt more as values increase)
+        monotonicity = 0
+        for row in grid:
+            # Filter out zeros and check monotonicity
+            non_zero = [val for val in row if val != 0]
+            if len(non_zero) > 1:
+                increasing = all(non_zero[i] <= non_zero[i+1] for i in range(len(non_zero)-1))
+                decreasing = all(non_zero[i] >= non_zero[i+1] for i in range(len(non_zero)-1))
+                if not (increasing or decreasing):
+                    # Penalty increases with max value in row
+                    max_val = max(row) if row else 0
+                    if max_val > 0:
+                        monotonicity -= max_val * math.log2(max_val) * 2
+        
+        for col in zip(*grid):
+            col = list(col)
+            non_zero = [val for val in col if val != 0]
+            if len(non_zero) > 1:
+                increasing = all(non_zero[i] <= non_zero[i+1] for i in range(len(non_zero)-1))
+                decreasing = all(non_zero[i] >= non_zero[i+1] for i in range(len(non_zero)-1))
+                if not (increasing or decreasing):
+                    max_val = max(col) if col else 0
+                    if max_val > 0:
+                        monotonicity -= max_val * math.log2(max_val) * 2
+        
+        # 3. Smoothness (penalty for large differences between neighbors)
+        smoothness = 0
+        for r in range(game.size):
+            for c in range(game.size - 1):
+                if grid[r][c] != 0 and grid[r][c+1] != 0:
+                    smoothness -= abs(grid[r][c] - grid[r][c+1])
+        for c in range(game.size):
+            for r in range(game.size - 1):
+                if grid[r][c] != 0 and grid[r+1][c] != 0:
+                    smoothness -= abs(grid[r][c] - grid[r+1][c])
+        
+        # 4. Max tile in corner bonus
+        max_tile_corner = max(max(row) for row in grid)
+        corner_bonus = 0
+        corners = [grid[0][0], grid[0][-1], grid[-1][0], grid[-1][-1]]
+        if max_tile_corner in corners:
+            corner_bonus = max_tile_corner * 10
+        
+        # 5. Merge potential (adjacent equal values)
+        merges = 0
+        for r in range(game.size):
+            for c in range(game.size - 1):
+                if grid[r][c] == grid[r][c+1] and grid[r][c] != 0:
+                    v = grid[r][c] * 2
+                    merges += v * math.log2(v) if v > 0 else 0
+        for c in range(game.size):
+            for r in range(game.size - 1):
+                if grid[r][c] == grid[r+1][c] and grid[r][c] != 0:
+                    v = grid[r][c] * 2
+                    merges += v * math.log2(v) if v > 0 else 0
+        
+        # 6. Max tile value
+        max_tile = max(max(row) for row in game.grid)
+        
+        # Weighted combination (tuned for expectimax)
+        # Note: game.score is NOT included as it's too heavily weighted toward immediate merges
+        return (empty_tiles * 2.7 + 
+                monotonicity * 1.0 +
+                smoothness * 0.1 + 
+                corner_bonus * 10.0 + 
+                merges * 2.5 + 
+                max_tile * 1.0) 
     
     def act_simple(self, game):
         """depth of one, picks best h (evaluate_h_v1)"""
@@ -380,33 +552,337 @@ class minmax_agent:
             for (r, c) in empty:
                 temp2 = game.clone()
                 for i in range(2):
-                    temp2.grid[r][c] = i+1*2
+                    temp2.grid[r][c] = (i+1)*2  # Fixed: (i+1)*2 gives 2 and 4
                     value = self.minmax(temp2, depth - 1, True)
                     if value < worst_score:
                         worst_score = value
 
             return worst_score
+    
+    def act_alpha_beta(self, game, depth=2):
+        """Alpha-beta pruning version of minmax, uses evaluate_h_v2"""
+        best_move = None
+        best_score = -float('inf')
+        alpha = -float('inf')
+        beta = float('inf')
+
+        for move in range(4):
+            moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+            if not moved:
+                continue
+        
+            temp = game.clone()
+            temp.grid = new_grid
+            temp.score += gained_score
+
+            #go down a branch with alpha-beta pruning
+            value = self.minmax_alpha_beta(temp, depth - 1, False, alpha, beta)
+
+            if value > best_score:
+                best_score = value
+                best_move = move
+            
+            # Update alpha at root level
+            alpha = max(alpha, value)
+
+        return best_move
+    
+    def minmax_alpha_beta(self, game, depth, maximizing, alpha=-float('inf'), beta=float('inf')):
+        """Minmax with alpha-beta pruning optimization"""
+        if game.is_game_over():
+            return 0
+        if depth == 0:
+            return self.evaluate_h_v2(game)
+        
+        if maximizing:
+            # Player's turn - maximize score
+            best_score = -float('inf')
+            for move in range(4):
+                moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+                if not moved:
+                    continue
+            
+                temp = game.clone()
+                temp.grid = new_grid
+                temp.score += gained_score
+
+                value = self.minmax_alpha_beta(temp, depth - 1, False, alpha, beta)
+
+                if value > best_score:
+                    best_score = value
+                
+                # Alpha-beta pruning: update alpha and check for beta cutoff
+                alpha = max(alpha, value)
+                if value >= beta:
+                    return value  # Beta cutoff - prune remaining branches
+            
+            return best_score if best_score != -float('inf') else self.evaluate_h_v2(game)
+        else:
+            # Opponent's turn - minimize score (worst case spawn)
+            worst_score = float('inf')
+
+            empty = [(r, c) for r in range(game.size) for c in range(game.size) if game.grid[r][c] == 0]
+            if not empty:
+                return self.evaluate_h_v2(game)  # no empty cells, return current evaluation
+
+            for (r, c) in empty:
+                # For each empty cell, find the worst spawn (minimum value)
+                cell_worst = float('inf')
+                for i in range(2):
+                    temp2 = game.clone()
+                    temp2.grid[r][c] = (i+1)*2  # Fixed: should be (i+1)*2 to get 2 and 4
+                    value = self.minmax_alpha_beta(temp2, depth - 1, True, alpha, beta)
+                    if value < cell_worst:
+                        cell_worst = value
+                    
+                    # Alpha-beta pruning: if this spawn gives value <= alpha, we can prune
+                    # because the maximizer won't choose this branch
+                    if value <= alpha:
+                        break  # Alpha cutoff - prune remaining spawns for this cell
+                
+                # Update worst_score with the worst value from this cell
+                if cell_worst < worst_score:
+                    worst_score = cell_worst
+                
+                # Update beta to be the minimum value found so far
+                beta = min(beta, worst_score)
+                
+                # If worst_score <= alpha, we can prune remaining empty cells
+                if worst_score <= alpha:
+                    break  # Alpha cutoff - prune remaining empty cells
+
+            return worst_score
+    
+    def _board_hash(self, game):
+        """Create a hash of the board state for transposition table"""
+        # Create a tuple representation of the grid
+        return tuple(tuple(row) for row in game.grid)
+    
+    def act_expectimax(self, game, depth=4):
+        """Expectimax algorithm - uses probabilistic expectations instead of worst-case"""
+        # Clear transposition table for new search
+        self.transposition_table.clear()
+        
+        best_move = None
+        best_score = -float('inf')
+
+        for move in range(4):
+            moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+            if not moved:
+                continue
+        
+            temp = game.clone()
+            temp.grid = new_grid
+            temp.score += gained_score
+
+            # Go down a branch with expectimax (expectation layer)
+            value = self.expectimax(temp, depth - 1, False)
+
+            if value > best_score:
+                best_score = value
+                best_move = move
+
+        return best_move
+    
+    def expectimax(self, game, depth, maximizing):
+        """Expectimax algorithm: maximizing player moves, expectation over random spawns"""
+        # Check transposition table
+        board_hash = self._board_hash(game)
+        cache_key = (board_hash, depth, maximizing)
+        if cache_key in self.transposition_table:
+            return self.transposition_table[cache_key]
+        
+        # Limit transposition table size
+        if len(self.transposition_table) > self.max_tt_size:
+            # Clear half of the table (simple FIFO-like behavior)
+            keys_to_remove = list(self.transposition_table.keys())[:self.max_tt_size // 2]
+            for key in keys_to_remove:
+                del self.transposition_table[key]
+        
+        if game.is_game_over():
+            result = 0
+            self.transposition_table[cache_key] = result
+            return result
+        
+        if depth == 0:
+            result = self.evaluate_h_expectimax(game)
+            self.transposition_table[cache_key] = result
+            return result
+        
+        if maximizing:
+            # Player's turn - maximize score
+            best_score = -float('inf')
+            for move in range(4):
+                moved, new_grid, gained_score, _ = game.apply_move_no_spawn(move)
+                if not moved:
+                    continue
+            
+                temp = game.clone()
+                temp.grid = new_grid
+                temp.score += gained_score
+
+                value = self.expectimax(temp, depth - 1, False)
+
+                if value > best_score:
+                    best_score = value
+            
+            result = best_score if best_score != -float('inf') else self.evaluate_h_expectimax(game)
+            self.transposition_table[cache_key] = result
+            return result
+        else:
+            # Expectation layer - weighted average over random tile spawns
+            empty = [(r, c) for r in range(game.size) for c in range(game.size) if game.grid[r][c] == 0]
+            if not empty:
+                result = self.evaluate_h_expectimax(game)
+                self.transposition_table[cache_key] = result
+                return result
+
+            expected_value = 0.0
+            
+            for (r, c) in empty:
+                # Evaluate spawn=2 (90% probability)
+                temp2 = game.clone()
+                temp2.grid[r][c] = 2
+                value_2 = self.expectimax(temp2, depth - 1, True)
+                
+                # Evaluate spawn=4 (10% probability)
+                temp4 = game.clone()
+                temp4.grid[r][c] = 4
+                value_4 = self.expectimax(temp4, depth - 1, True)
+                
+                # Weighted average for this cell: 0.9 * value_2 + 0.1 * value_4
+                cell_expected = 0.9 * value_2 + 0.1 * value_4
+                expected_value += cell_expected
+            
+            # Average across all empty cells
+            result = expected_value / len(empty)
+            self.transposition_table[cache_key] = result
+            return result
         
         
 ############################################################
 
+def benchmark_ai_methods(num_games=10, depth=4):
+    """
+    Benchmark all AI methods and rank them by average score.
+    Runs games without pygame display for speed.
+    """
+    print(f"\n{'='*60}")
+    print(f"Benchmarking AI Methods ({num_games} games each, depth={depth})")
+    print(f"{'='*60}\n")
+    
+    ai = minmax_agent()
+    methods = {
+        "random": lambda game: ai.act_random(game),
+        "simple": lambda game: ai.act_simple(game),
+        "minmax": lambda game: ai.act_simple_minmax(game, depth=depth),
+        "alpha_beta": lambda game: ai.act_alpha_beta(game, depth=depth),
+        "expectimax": lambda game: ai.act_expectimax(game, depth=depth),
+    }
+    
+    results = {}
+    
+    for method_name, method_func in methods.items():
+        print(f"Testing {method_name}...", end=" ", flush=True)
+        scores = []
+        
+        for game_num in range(num_games):
+            game = Game2048()
+            moves = 0
+            max_moves = 10000  # Safety limit
+            
+            while not game.is_game_over() and moves < max_moves:
+                move = method_func(game)
+                if move is None:
+                    break
+                game.move(move)
+                moves += 1
+            
+            scores.append(game.score)
+            if num_games > 5 and (game_num + 1) % (num_games // 5) == 0:
+                print(".", end="", flush=True)
+        
+        avg_score = sum(scores) / len(scores)
+        max_score = max(scores)
+        min_score = min(scores)
+        results[method_name] = {
+            'average': avg_score,
+            'max': max_score,
+            'min': min_score,
+            'scores': scores
+        }
+        print(f" Done! Avg: {avg_score:.0f}")
+    
+    # Rank by average score
+    ranked = sorted(results.items(), key=lambda x: x[1]['average'], reverse=True)
+    
+    print(f"\n{'='*60}")
+    print("RANKING BY AVERAGE SCORE:")
+    print(f"{'='*60}\n")
+    
+    for rank, (method_name, stats) in enumerate(ranked, 1):
+        print(f"{rank}. {method_name.upper():<15} | "
+              f"Avg: {stats['average']:>8.0f} | "
+              f"Max: {stats['max']:>8.0f} | "
+              f"Min: {stats['min']:>8.0f}")
+    
+    print(f"\n{'='*60}\n")
+    
+    return results
+
 def main():
     clock = pygame.time.Clock()
+    
+    # Show menu to select AI method
+    ai_method = show_ai_menu()
+    if ai_method is None:
+        pygame.quit()
+        return
+    
     game = Game2048()
     running = True
     game_over = False
     ai = minmax_agent()
-    use_ai = True
+    ai_depth = 4
+    
+    # AI method names for display
+    ai_names = {
+        "random": "Random",
+        "simple": "Simple Greedy",
+        "minmax": "Minmax",
+        "alpha_beta": "Alpha-Beta",
+        "expectimax": "Expectimax",
+        "manual": "Manual"
+    }
 
     while running:
         clock.tick(FPS)
         draw_grid(WINDOW, game)
+        
+        # Display current AI method (after grid so it's on top)
+        method_font = pygame.font.SysFont("comicsans", 20)
+        if ai_method == "manual":
+            method_text = method_font.render(f"Mode: {ai_names[ai_method]}", True, (100, 90, 80))
+        else:
+            method_text = method_font.render(f"AI: {ai_names[ai_method]}", True, (100, 90, 80))
+        WINDOW.blit(method_text, (15, HEIGHT - 30))
+        pygame.display.update()  # Update again to show method text
 
-
-        if use_ai and not game_over:
-            #move = ai.act_random(game) #moves randomly
-            #move = ai.act_simple(game) #only looking for best h for one layer
-            move = ai.act_simple_minmax(game, depth = 4)
+        if ai_method != "manual" and not game_over:
+            # Execute selected AI method
+            if ai_method == "random":
+                move = ai.act_random(game)
+            elif ai_method == "simple":
+                move = ai.act_simple(game)
+            elif ai_method == "minmax":
+                move = ai.act_simple_minmax(game, depth=ai_depth)
+            elif ai_method == "alpha_beta":
+                move = ai.act_alpha_beta(game, depth=ai_depth)
+            elif ai_method == "expectimax":
+                move = ai.act_expectimax(game, depth=ai_depth)
+            else:
+                move = None
+            
             if move is not None:
                 game.move(move)
 
@@ -440,7 +916,8 @@ def main():
                 if game_over:
                     continue
 
-                elif event.key == pygame.K_UP:
+                # Manual controls (arrow keys always work for manual override)
+                if event.key == pygame.K_UP:
                     game.move(2)
                 elif event.key == pygame.K_RIGHT:
                     game.move(1)
@@ -455,4 +932,12 @@ def main():
     pygame.quit()
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    # Check if user wants to run benchmark
+    if len(sys.argv) > 1 and sys.argv[1] == "benchmark":
+        num_games = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        depth = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+        benchmark_ai_methods(num_games=num_games, depth=depth)
+    else:
+        main()
