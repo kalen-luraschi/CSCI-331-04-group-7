@@ -10,6 +10,7 @@ import pygame
 import random
 import math
 from copy import deepcopy
+import time
 
 pygame.init()
 FPS = 60
@@ -209,6 +210,10 @@ def draw_grid(win, game):
 
     pygame.display.update()
 
+def log_result(text):
+    with open("results.txt", "a") as f:
+        f.write(text + "\n")
+
 ##############################################################################
 class minmax_agent:
     """
@@ -236,11 +241,68 @@ class minmax_agent:
             
         return random.choice(valid_moves)
     
+    snakeGrid = []
+
     def evaluate_h_v1(self, game):
         """h: prefer high score, more empty spaces, and big tiles."""
         empty_tiles = sum(row.count(0) for row in game.grid)
         max_tile = max(max(row) for row in game.grid)
+
         return game.score + empty_tiles * 10 + max_tile / 4
+    
+    def evaluate_h_v2(self, game):
+        grid = game.grid
+
+        #1 empty tiles in game
+        empty_tiles = sum(row.count(0) for row in game.grid)
+
+        # 2. Smoothness (penalty for large differences between neighbors)
+        smoothness = 0
+        for r in range(game.size):
+            for c in range(game.size - 1):
+                if grid[r][c] != 0 and grid[r][c+1] != 0:
+                    smoothness -= abs(grid[r][c] - grid[r][c+1])
+        for c in range(game.size):
+            for r in range(game.size - 1):
+                if grid[r][c] != 0 and grid[r+1][c] != 0:
+                    smoothness -= abs(grid[r][c] - grid[r+1][c])
+
+        # (reward increasing rows/cols)
+        # mono = 0
+        # for row in grid:
+        #     if row == sorted(row) or row == sorted(row, reverse=True):
+        #         mono += 50
+
+        # for col in zip(*grid):
+        #     col = list(col)
+        #     if col == sorted(col) or col == sorted(col, reverse=True):
+        #         mono += 50
+
+        # Max tile in corner bonus
+        max_tile_corner = max(max(row) for row in grid)
+        corner_bonus = 0
+        corners = [grid[0][0], grid[0][-1], grid[-1][0], grid[-1][-1]]
+        if max_tile_corner in corners:
+            corner_bonus = max_tile_corner * 10
+
+        #max tile 
+        max_tile = max(max(row) for row in game.grid)
+
+        #Merge potential
+        merges = 0
+        for r in range(game.size):
+            for c in range(game.size - 1):
+                if grid[r][c] == grid[r][c+1] and grid[r][c] != 0:
+                    v = grid[r][c] * 2
+                    merges += v * math.log2(v)
+        for c in range(game.size):
+            for r in range(game.size - 1):
+                if grid[r][c] == grid[r+1][c] and grid[r][c] != 0:
+                    v = grid[r][c] * 2
+                    merges += v * math.log2(v)
+        merge_score = merges * 500
+
+        return empty_tiles + smoothness * 100 + corner_bonus * 1000 + merge_score + game.score + max_tile * 20 
     
     def act_simple(self, game):
         """depth of one, picks best h (evaluate_h_v1)"""
@@ -260,7 +322,7 @@ class minmax_agent:
         return best_move
     
     def act_simple_minmax(self, game, depth=2):
-        """first minmax try, picks best h (evaluate_h_v1)"""
+        """first minmax try, picks best h (evaluate_h_v2)"""
         best_move = None
         best_score = -float('inf')
 
@@ -284,8 +346,10 @@ class minmax_agent:
         return best_move
     
     def minmax(self, game, depth, maximizing):
-        if depth == 0 or game.is_game_over():
-            return game.score
+        if game.is_game_over():
+            return 0
+        if depth == 0:
+            return self.evaluate_h_v2(game)
         
         if maximizing:
             #starts this branch by doing possible 4 move
@@ -304,18 +368,23 @@ class minmax_agent:
                 if value > best_score:
                     best_score = value
                 
-            return best_score if best_score != -float('inf') else game.score
+            return best_score if best_score != -float('inf') else self.evaluate_h_v2(game)
         else:
-            #starts (supposed to) this branch by creating an instance of every possible random spot filled by a 2 or 4
-            #next if idk
+            # random turn — simulate the computer placing a new 2 or 4 (just 2 for now)
             worst_score = float('inf')
-            #implement part that calculates random spawns here
-            for _ in range(2):
-                temp = game.clone()
-                temp.spawn_tile()
-                value = self.minmax(temp, depth - 1, True)
-                if value < worst_score:
-                    worst_score = value
+
+            empty = [(r, c) for r in range(game.size) for c in range(game.size) if game.grid[r][c] == 0]
+            if not empty:
+                return self.evaluate_h_v2(game)  # no empty cells, return current evaluation
+
+            for (r, c) in empty:
+                temp2 = game.clone()
+                for i in range(2):
+                    temp2.grid[r][c] = i+1*2
+                    value = self.minmax(temp2, depth - 1, True)
+                    if value < worst_score:
+                        worst_score = value
+
             return worst_score
         
         
@@ -333,10 +402,11 @@ def main():
         clock.tick(FPS)
         draw_grid(WINDOW, game)
 
+
         if use_ai and not game_over:
             #move = ai.act_random(game) #moves randomly
             #move = ai.act_simple(game) #only looking for best h for one layer
-            move = ai.act_simple_minmax(game, depth = 8) #very simple minmax algorithm
+            move = ai.act_simple_minmax(game, depth = 4)
             if move is not None:
                 game.move(move)
 
