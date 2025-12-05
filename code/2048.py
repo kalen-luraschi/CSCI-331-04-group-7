@@ -1,7 +1,6 @@
 """
 Classic 2048 — Pygame Edition (original style remix)
-Author(s): Kalen Luraschi, (add names here when worked on)
-
+Author(s): Kalen Luraschi, Daniel Birley
 Arrow keys = move tiles
 Press ESC to quit
 """
@@ -252,7 +251,7 @@ def show_ai_menu():
         ("2", "Simple Greedy", "One-step lookahead"),
         ("3", "Minmax", "Multi-step search"),
         ("4", "Alpha-Beta", "Minmax with pruning"),
-        ("5", "Expectimax", "Probabilistic expectations (optimized)"),
+        ("5", "Expectimax", "Probabilistic expectations"),
         ("M", "Manual", "Play yourself (arrow keys)"),
     ]
     
@@ -811,22 +810,18 @@ def benchmark_ai_methods(num_games=10, depth=4):
             'min': min_score,
             'scores': scores
         }
-        print(f" Done! Avg: {avg_score:.0f}")
+        print(f" Average Score: {avg_score:.0f}")
     
     # Rank by average score
     ranked = sorted(results.items(), key=lambda x: x[1]['average'], reverse=True)
     
-    print(f"\n{'='*60}")
     print("RANKING BY AVERAGE SCORE:")
-    print(f"{'='*60}\n")
     
     for rank, (method_name, stats) in enumerate(ranked, 1):
         print(f"{rank}. {method_name.upper():<15} | "
               f"Avg: {stats['average']:>8.0f} | "
               f"Max: {stats['max']:>8.0f} | "
               f"Min: {stats['min']:>8.0f}")
-    
-    print(f"\n{'='*60}\n")
     
     return results
 
