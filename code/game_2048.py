@@ -1,7 +1,6 @@
 """
 Classic 2048 — Pygame Edition (original style remix)
-Author(s): Kalen Luraschi, (add names here when worked on)
-
+Author(s): Kalen Luraschi, Daniel Birley
 Arrow keys = move tiles
 Press ESC to quit
 """
@@ -234,7 +233,7 @@ def show_ai_menu():
         ("2", "Simple Greedy", "One-step lookahead"),
         ("3", "Minmax", "Multi-step search"),
         ("4", "Alpha-Beta", "Minmax with pruning"),
-        ("5", "Expectimax", "Probabilistic expectations (optimized)"),
+        ("5", "Expectimax", "Probabilistic expectations"),
         ("M", "Manual", "Play yourself (arrow keys)"),
     ]
     
