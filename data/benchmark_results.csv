@@ -1,0 +1,2 @@
+method,avg_score,max_score,min_score,avg_highest_tile,max_highest_tile,avg_time_per_move,moves_per_second,time_for_10_moves
+random,1095.92512,5476,68,107.49192,512,5.805851315190825e-05,17224.002918978167,0.0005805851315190825

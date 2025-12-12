@@ -13,10 +13,21 @@ Developers:
 - Daniel Birley
 
 How to run the project guid:
-- In the `code` folder run `python 2048.py`
+- In the `code` folder run `python game_2048.py`
+Run automated benchmarks:
+- in the `code` folder run `python auto_benchmark.py`
 
+The following AI strategies were implemented:
+- Random – selects a random valid move (baseline).
+- Simple Greedy – evaluates one move ahead using a heuristic.
+- Minimax – multi-step search assuming worst-case tile placement.
+- Alpha-Beta Pruning – optimized minimax that prunes unnecessary branches.
+- Expectimax – probabilistic search that models random tile spawns.
 
-At first i made a random direction picker
-obviously this did not work so well unless if you get very lucky
-
-next I made an algorithm that picks a branch from one tree 
+The AI agents use a weighted heuristic function that considers:
+- Number of empty tiles
+- Smoothness between neighboring tiles
+- Monotonic (snake-like) tile ordering
+- Corner placement of the highest tile
+- Merge potential for large tiles
+- These heuristics guide the AI toward stable board states and high-value merges.

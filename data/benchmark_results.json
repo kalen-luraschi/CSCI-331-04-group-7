@@ -1,0 +1,13 @@
+{
+    "random": {
+        "method": "random",
+        "avg_score": 1095.92512,
+        "max_score": 5476,
+        "min_score": 68,
+        "avg_highest_tile": 107.49192,
+        "max_highest_tile": 512,
+        "avg_time_per_move": 5.805851315190825e-05,
+        "moves_per_second": 17224.002918978167,
+        "time_for_10_moves": 0.0005805851315190825
+    }
+}

@@ -155,7 +155,7 @@ class Game2048:
         return True
     
     #####################################################################
-    #                    minmax functions below                         #
+    #                    Helper functions below                         #
     #####################################################################
     
     def clone(self):
@@ -164,7 +164,6 @@ class Game2048:
         g.score = self.score
         return g
     
-    # for when minmax has to check the future branches
     def apply_move_no_spawn(self, direction):
         grid_copy = [row[:] for row in self.grid]
         score_before = self.score
@@ -200,19 +199,6 @@ class Game2048:
 
         return moved, new_grid, temp_score, score_before
 
-    
-def draw_grid(win, game):
-    win.fill(BG_COLOR)
-    for r in range(game.size):
-        for c in range(game.size):
-            val = game.grid[r][c]
-            tile = Tile(val, r, c)
-            tile.draw(win)
-    for i in range(1, game.size):
-        pygame.draw.line(win, GRID_COLOR, (0, i * TILE_SIZE), (WIDTH, i * TILE_SIZE), 6)
-        pygame.draw.line(win, GRID_COLOR, (i * TILE_SIZE, 0), (i * TILE_SIZE, HEIGHT), 6)
-    pygame.display.update()
-
 def draw_grid(win, game):
     win.fill(BG_COLOR)
 
@@ -231,10 +217,6 @@ def draw_grid(win, game):
     win.blit(score_text, (15, 10))
 
     pygame.display.update()
-
-def log_result(text):
-    with open("results.txt", "a") as f:
-        f.write(text + "\n")
 
 def show_ai_menu():
     """Display menu for selecting AI method"""
@@ -312,7 +294,7 @@ class minmax_agent:
     first we get the root which is the current game state
         then we have our 4 directions we can move the board
         we move in all directions to get our child branches (4) with the new move
-            for each direction we can move, we place a 2 and a 4(for now just 2) in each spot(if spot is open) and take the average h of all possible random spawns
+            for each direction we can move, we place a 2 and a 4 in each spot(if spot is open) and take the average h of all possible random spawns
         we then choose the best h from the 4 directions
     """
     def __init__(self, depth=3):
@@ -334,8 +316,6 @@ class minmax_agent:
             return None
             
         return random.choice(valid_moves)
-    
-    snakeGrid = []
 
     def evaluate_h_v1(self, game):
         """h: prefer high score, more empty spaces, and big tiles."""
@@ -347,57 +327,71 @@ class minmax_agent:
     def evaluate_h_v2(self, game):
         grid = game.grid
 
-        #1 empty tiles in game
-        empty_tiles = sum(row.count(0) for row in game.grid)
+        # 1. Empty tiles (hugely important)
+        empty = sum(row.count(0) for row in grid)
+        empty_score = empty * 300  # main driver for survival
 
-        # 2. Smoothness (penalty for large differences between neighbors)
+        # 2. Smoothness (penalize big jumps)
         smoothness = 0
         for r in range(game.size):
             for c in range(game.size - 1):
-                if grid[r][c] != 0 and grid[r][c+1] != 0:
+                if grid[r][c] and grid[r][c+1]:
                     smoothness -= abs(grid[r][c] - grid[r][c+1])
+
         for c in range(game.size):
             for r in range(game.size - 1):
-                if grid[r][c] != 0 and grid[r+1][c] != 0:
+                if grid[r][c] and grid[r+1][c]:
                     smoothness -= abs(grid[r][c] - grid[r+1][c])
 
-        # (reward increasing rows/cols)
-        # mono = 0
-        # for row in grid:
-        #     if row == sorted(row) or row == sorted(row, reverse=True):
-        #         mono += 50
+        smoothness *= 0.5
 
-        # for col in zip(*grid):
-        #     col = list(col)
-        #     if col == sorted(col) or col == sorted(col, reverse=True):
-        #         mono += 50
+        # 3. Monotonicity (reward snake-like shapes)
+        mono = 0
+        for row in grid:
+            nonzero = [x for x in row if x != 0]
+            if nonzero == sorted(nonzero) or nonzero == sorted(nonzero, reverse=True):
+                mono += 100
 
-        # Max tile in corner bonus
-        max_tile_corner = max(max(row) for row in grid)
-        corner_bonus = 0
+        for col in zip(*grid):
+            nonzero = [x for x in col if x != 0]
+            if nonzero == sorted(nonzero) or nonzero == sorted(nonzero, reverse=True):
+                mono += 100
+
+        # 4. Corner bonus
+        max_tile = max(max(row) for row in grid)
         corners = [grid[0][0], grid[0][-1], grid[-1][0], grid[-1][-1]]
-        if max_tile_corner in corners:
-            corner_bonus = max_tile_corner * 10
+        corner_bonus = 300 if max_tile in corners else 0
 
-        #max tile 
-        max_tile = max(max(row) for row in game.grid)
-
-        #Merge potential
-        merges = 0
+        # 5. Merge reward (exponentially better for big merges)
+        merge_reward = 0
         for r in range(game.size):
             for c in range(game.size - 1):
                 if grid[r][c] == grid[r][c+1] and grid[r][c] != 0:
                     v = grid[r][c] * 2
-                    merges += v * math.log2(v)
+                    merge_reward += v * math.log2(v)
+
         for c in range(game.size):
             for r in range(game.size - 1):
                 if grid[r][c] == grid[r+1][c] and grid[r][c] != 0:
                     v = grid[r][c] * 2
-                    merges += v * math.log2(v)
-        merge_score = merges * 500
+                    merge_reward += v * math.log2(v)
 
-        return empty_tiles + smoothness * 100 + corner_bonus * 1000 + merge_score + game.score + max_tile * 20
-    
+        merge_reward *= 1.2
+
+        snake_weights = [
+            [8,  32,  4096, 12500],
+            [4,  64,  2048, 16384],
+            [2,  128, 1024, 32768],
+            [1,  256, 512,  70000],
+        ]
+        
+        snake_score = 0
+        for r in range(game.size):
+            for c in range(game.size):
+                snake_score += grid[r][c] * snake_weights[r][c]
+
+        return empty_score + smoothness + mono + corner_bonus + merge_reward + (snake_score * 0.5)
+
     def evaluate_h_expectimax(self, game):
         """
         Optimized heuristic for expectimax based on Stack Overflow best practices.
@@ -466,7 +460,7 @@ class minmax_agent:
         
         # 6. Max tile value
         max_tile = max(max(row) for row in game.grid)
-        
+
         # Weighted combination (tuned for expectimax)
         # Note: game.score is NOT included as it's too heavily weighted toward immediate merges
         return (empty_tiles * 2.7 + 
@@ -493,7 +487,7 @@ class minmax_agent:
                     best_move = move
         return best_move
     
-    def act_simple_minmax(self, game, depth=2):
+    def act_minimax(self, game, depth=2):
         """first minmax try, picks best h (evaluate_h_v2)"""
         best_move = None
         best_score = -float('inf')
@@ -547,12 +541,12 @@ class minmax_agent:
 
             empty = [(r, c) for r in range(game.size) for c in range(game.size) if game.grid[r][c] == 0]
             if not empty:
-                return self.evaluate_h_v2(game)  # no empty cells, return current evaluation
+                return self.evaluate_h_v2(game)
 
             for (r, c) in empty:
                 temp2 = game.clone()
                 for i in range(2):
-                    temp2.grid[r][c] = (i+1)*2  # Fixed: (i+1)*2 gives 2 and 4
+                    temp2.grid[r][c] = (i+1)*2
                     value = self.minmax(temp2, depth - 1, True)
                     if value < worst_score:
                         worst_score = value
@@ -764,70 +758,121 @@ class minmax_agent:
 
 def benchmark_ai_methods(num_games=10, depth=4):
     """
-    Benchmark all AI methods and rank them by average score.
-    Runs games without pygame display for speed.
+    Benchmark all AI methods with enhanced metrics:
+    - average score
+    - highest tile
+    - time per move
+    - moves per second
+    - time to perform 10 moves
     """
-    print(f"\n{'='*60}")
-    print(f"Benchmarking AI Methods ({num_games} games each, depth={depth})")
-    print(f"{'='*60}\n")
+    
+    print(f"\n{'='*65}")
+    print(f" Benchmarking AI Methods ({num_games} games each, depth={depth})")
+    print(f"{'='*65}\n")
     
     ai = minmax_agent()
     methods = {
         "random": lambda game: ai.act_random(game),
         "simple": lambda game: ai.act_simple(game),
-        "minmax": lambda game: ai.act_simple_minmax(game, depth=depth),
+        "minmax": lambda game: ai.act_minimax(game, depth=depth),
         "alpha_beta": lambda game: ai.act_alpha_beta(game, depth=depth),
         "expectimax": lambda game: ai.act_expectimax(game, depth=depth),
     }
     
     results = {}
-    
+
     for method_name, method_func in methods.items():
         print(f"Testing {method_name}...", end=" ", flush=True)
+
         scores = []
-        
+        highest_tiles = []
+        total_moves = 0
+        total_time = 0.0
+
+        # ==============================
+        # Measure time for 10 consecutive moves
+        # ==============================
+        temp_game = Game2048()
+        ten_move_start = time.time()
+        m = 0
+        while m < 10 and not temp_game.is_game_over():
+            move = method_func(temp_game)
+            if move is None:
+                break
+            temp_game.move(move)
+            m += 1
+        ten_move_time = time.time() - ten_move_start
+
+        # ==============================
+        # Main benchmark loop
+        # ==============================
         for game_num in range(num_games):
             game = Game2048()
             moves = 0
-            max_moves = 10000  # Safety limit
+            max_moves = 5000  # prevent infinite loops
             
+            start = time.time()
+
             while not game.is_game_over() and moves < max_moves:
                 move = method_func(game)
                 if move is None:
                     break
                 game.move(move)
                 moves += 1
+
+            elapsed = time.time() - start
             
+            # Record metrics
             scores.append(game.score)
-            if num_games > 5 and (game_num + 1) % (num_games // 5) == 0:
+            highest_tiles.append(max(max(row) for row in game.grid))
+            total_moves += moves
+            total_time += elapsed
+
+            if num_games > 5 and (game_num + 1) % max(1, num_games // 5) == 0:
                 print(".", end="", flush=True)
-        
+
+        # Compute stats
         avg_score = sum(scores) / len(scores)
-        max_score = max(scores)
-        min_score = min(scores)
+        avg_highest_tile = sum(highest_tiles) / len(highest_tiles)
+
+        avg_time_per_move = total_time / total_moves if total_moves else 0
+        moves_per_second = total_moves / total_time if total_time else 0
+        
         results[method_name] = {
-            'average': avg_score,
-            'max': max_score,
-            'min': min_score,
-            'scores': scores
+            'avg_score': avg_score,
+            'max_score': max(scores),
+            'min_score': min(scores),
+            'avg_highest_tile': avg_highest_tile,
+            'max_highest_tile': max(highest_tiles),
+            'avg_time_per_move': avg_time_per_move,
+            'moves_per_second': moves_per_second,
+            'time_for_10_moves': ten_move_time
         }
-        print(f" Done! Avg: {avg_score:.0f}")
-    
-    # Rank by average score
-    ranked = sorted(results.items(), key=lambda x: x[1]['average'], reverse=True)
-    
-    print(f"\n{'='*60}")
-    print("RANKING BY AVERAGE SCORE:")
-    print(f"{'='*60}\n")
-    
-    for rank, (method_name, stats) in enumerate(ranked, 1):
-        print(f"{rank}. {method_name.upper():<15} | "
-              f"Avg: {stats['average']:>8.0f} | "
-              f"Max: {stats['max']:>8.0f} | "
-              f"Min: {stats['min']:>8.0f}")
-    
-    print(f"\n{'='*60}\n")
-    
+
+        print(f" Done! Score={avg_score:.0f}, Tile={avg_highest_tile:.0f}, t/10={ten_move_time:.4f}s")
+
+    print(f"\n{'='*70}")
+    print(" Ranking by Average Score")
+    print(f"{'='*70}\n")
+
+    ranked = sorted(results.items(), key=lambda x: x[1]['avg_score'], reverse=True)
+
+    # Clean table header
+    print("ALGORITHM      AVG SCORE   MAX SCORE   MIN SCORE   AVG TILE   MAX TILE   T/MOVE      T/10       MOVES/SEC")
+    print("-" * 70)
+
+    for method_name, stats in ranked:
+        print(f"{method_name:<14}"
+              f"{stats['avg_score']:>10.0f}   "
+              f"{stats['max_score']:>9.0f}   "
+              f"{stats['min_score']:>9.0f}   "
+              f"{stats['avg_highest_tile']:>9.0f}   "
+              f"{stats['max_highest_tile']:>8.0f}   "
+              f"{stats['avg_time_per_move']:.5f}s   "
+              f"{stats['time_for_10_moves']:.4f}s   "
+              f"{stats['moves_per_second']:.1f}")   
+
+    print(f"{'='*70}\n")
     return results
 
 def main():
@@ -875,7 +920,7 @@ def main():
             elif ai_method == "simple":
                 move = ai.act_simple(game)
             elif ai_method == "minmax":
-                move = ai.act_simple_minmax(game, depth=ai_depth)
+                move = ai.act_minimax(game, depth=ai_depth)
             elif ai_method == "alpha_beta":
                 move = ai.act_alpha_beta(game, depth=ai_depth)
             elif ai_method == "expectimax":
